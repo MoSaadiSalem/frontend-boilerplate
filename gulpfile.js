@@ -1,106 +1,209 @@
 // Initialize modules
 // Importing specific gulp API functions lets us write them below as series() instead of gulp.series()
-const { src, dest, watch, series, parallel } = require('gulp');
-// Importing all the Gulp-related packages we want to use
-const sass = require('gulp-sass')(require('sass'));
-const concat = require('gulp-concat');
-const terser = require('gulp-terser');
-const postcss = require('gulp-postcss');
-const autoprefixer = require('autoprefixer');
-const cssnano = require('cssnano');
-const replace = require('gulp-replace');
-const browsersync = require('browser-sync').create();
+import gulp from 'gulp';
+const { src, dest, watch, series, parallel, lastRun } = gulp;
 
-// File paths
-const files = {
-	scssPath: 'app/scss/**/*.scss',
-	jsPath: 'app/js/**/*.js',
+// Importing all the Gulp-related packages we want to use
+import gulpSass from 'gulp-sass';
+import nodeSass from 'sass';
+const sass = gulpSass(nodeSass);
+
+import concat from 'gulp-concat';
+import terser from 'gulp-terser';
+import postcss from 'gulp-postcss';
+import autoprefixer from 'autoprefixer';
+import cssnano from 'cssnano';
+import purgecss from '@fullhuman/postcss-purgecss';
+import replace from 'gulp-replace';
+import stylelint from 'stylelint';
+// import cssVariables from 'postcss-css-variables';
+// import postcssPresetEnv from 'postcss-preset-env';
+
+// BrowserSync
+import browsersync from 'browser-sync';
+const browserSync = browsersync.create();
+const reload = browserSync.reload;
+
+const baseDirectory = './docs/';
+const devDir = './src/';
+const distDir = './docs/';
+
+const paths = {
+  html: {
+    src: `${devDir}**/*.html`,
+    dest: `${distDir}`,
+  },
+  css: {
+    src: `${devDir}css/**/*.css`,
+    cssTmp: `${devDir}tmp/css/`,
+    dest: `${distDir}css/`,
+  },
+  sass: {
+    src: `${devDir}scss/**/*.scss`,
+    cssTmp: `${devDir}tmp/css/`,
+    dest: `${distDir}css/`,
+  },
+  js: {
+    src: './src/js/**/*.js',
+    dest: `${distDir}js/`,
+  },
+  img: {
+    src: `${devDir}assets/img/**/*`,
+    dest: `${distDir}assets/img/`,
+  },
+  fonts: {
+    src: `${devDir}assets/fonts/**/*`,
+    dest: `${distDir}assets/fonts/`,
+  },
+  lib: {
+    src: `${devDir}lib/**/*`,
+    dest: `${distDir}lib/`,
+  },
 };
+
+const fileNames = {
+  dist: {
+    css: 'style.css',
+    js: 'all.js',
+  },
+};
+
+// PostCSS Plugins
+const postcssPlugins = [
+  autoprefixer(),
+  cssnano(),
+  stylelint(),
+  purgecss({
+    content: ['./**/*.html'],
+  }),
+  // postcssPresetEnv(),
+  // cssVariables() // transform CSS Custom Properties (CSS variables) syntax into a static representation.
+];
+
+// HTML task
+function htmlTask() {
+  return src(paths.html.src, { since: lastRun(htmlTask) }).pipe(
+    dest(paths.html.dest),
+  );
+}
+
+// Images task
+function imgTask() {
+  return src(paths.img.src, { since: lastRun(imgTask) }).pipe(
+    dest(paths.img.dest),
+  );
+}
+
+// Fonts task
+function fontsTask() {
+  return src(paths.fonts.src, { since: lastRun(fontsTask) }).pipe(
+    dest(paths.fonts.dest),
+  );
+}
+
+// Fontawesome task
+function fontawesomeTask() {
+  return src('node_modules/@fortawesome/fontawesome-free/webfonts/*').pipe(
+    gulp.dest(`${distDir}assets/fonts/fontawesome/webfonts`),
+  );
+}
 
 // Sass task: compiles the style.scss file into style.css
 function scssTask() {
-	return src(files.scssPath, { sourcemaps: true }) // set source and turn on sourcemaps
-		.pipe(sass()) // compile SCSS to CSS
-		.pipe(postcss([autoprefixer(), cssnano()])) // PostCSS plugins
-		.pipe(dest('dist', { sourcemaps: '.' })); // put final CSS in dist folder with sourcemap
+  // sourcemaps: set source and turn on sourcemaps
+  // lastRun: enables incremental builds to speed up execution times by skipping files that haven't changed since the last successful task completion
+  return src(paths.sass.src, {
+    sourcemaps: true,
+    // since: lastRun(scssTask),
+  })
+    .pipe(sass()) // compile SCSS to CSS
+    .pipe(dest(paths.sass.cssTmp)) // put a dev CSS in temp folder without sourcemap in source directory
+    .pipe(postcss(postcssPlugins)) // PostCSS plugins
+    .pipe(
+      dest(paths.sass.dest, { sourcemaps: '.' }), // put final CSS in production folder with sourcemap
+    );
+  // .pipe(browserSync.stream());
 }
 
-// JS task: concatenates and uglifies JS files to script.js
+// PostCSS task: compiles the style.scss file into style.css
+function cssTask() {
+  return src(paths.css.src)
+    .pipe(postcss(plugins)) // PostCSS plugins
+    .pipe(concat('styles.css'))
+    .pipe(
+      dest(paths.css.dest), // put final CSS in dist folder with sourcemap
+    )
+    .pipe(browserSync.stream());
+}
+
+// JS task: concatenates and uglifies JS Source Files to all.js
 function jsTask() {
-	return src(
-		[
-			files.jsPath,
-			//,'!' + 'includes/js/jquery.min.js', // to exclude any specific files
-		],
-		{ sourcemaps: true }
-	)
-		.pipe(concat('all.js'))
-		.pipe(terser())
-		.pipe(dest('dist', { sourcemaps: '.' }));
+  return src(
+    [
+      paths.js.src,
+      //,'!' + 'includes/js/jquery.min.js', // to exclude any specific Source Files
+    ],
+    { sourcemaps: true },
+  )
+    .pipe(concat(fileNames.dist.js))
+    .pipe(terser())
+    .pipe(dest(paths.js.dest, { sourcemaps: '.' }));
 }
 
 // Cachebust
 function cacheBustTask() {
-	var cbString = new Date().getTime();
-	return src(['index.html'])
-		.pipe(replace(/cb=\d+/g, 'cb=' + cbString))
-		.pipe(dest('.'));
+  const cbString = new Date().getTime();
+  return src(paths.html.src)
+    .pipe(replace(/cb=\d+/g, 'cb=' + cbString))
+    .pipe(dest(paths.html.dest));
 }
 
 // Browsersync to spin up a local server
-function browserSyncServe(cb) {
-	// initializes browsersync server
-	browsersync.init({
-		server: {
-			baseDir: '.',
-		},
-		notify: {
-			styles: {
-				top: 'auto',
-				bottom: '0',
-			},
-		},
-	});
-	cb();
-}
-function browserSyncReload(cb) {
-	// reloads browsersync server
-	browsersync.reload();
-	cb();
+function bsSync() {
+  browserSync.init({
+    open: false,
+    injectChanges: true,
+    server: {
+      baseDir: baseDirectory,
+    },
+  });
 }
 
-// Watch task: watch SCSS and JS files for changes
-// If any change, run scss and js tasks simultaneously
+// Watch task:
 function watchTask() {
-	watch(
-		[files.scssPath, files.jsPath],
-		{ interval: 1000, usePolling: true }, //Makes docker work
-		series(parallel(scssTask, jsTask), cacheBustTask)
-	);
-}
-
-// Browsersync Watch task
-// Watch HTML file for change and reload browsersync server
-// watch SCSS and JS files for changes, run scss and js tasks simultaneously and update browsersync
-function bsWatchTask() {
-	watch('index.html', browserSyncReload);
-	watch(
-		[files.scssPath, files.jsPath],
-		{ interval: 1000, usePolling: true }, //Makes docker work
-		series(parallel(scssTask, jsTask), cacheBustTask, browserSyncReload)
-	);
+  watch(
+    [
+      paths.html.src,
+      paths.sass.src,
+      paths.js.src,
+      paths.img.src,
+      paths.fonts.src,
+    ],
+    { interval: 1000, usePolling: true }, //Makes docker work
+    series(
+      parallel(htmlTask, scssTask, jsTask),
+      parallel(imgTask, fontsTask),
+      cacheBustTask,
+    ),
+  );
 }
 
 // Export the default Gulp task so it can be run
-// Runs the scss and js tasks simultaneously
-// then runs cacheBust, then watch task
-exports.default = series(parallel(scssTask, jsTask), cacheBustTask, watchTask);
+const _default = series(parallel(scssTask, jsTask), cacheBustTask, watchTask);
+export { _default as default };
 
-// Runs all of the above but also spins up a local Browsersync server
-// Run by typing in "gulp bs" on the command line
-exports.bs = series(
-	parallel(scssTask, jsTask),
-	cacheBustTask,
-	browserSyncServe,
-	bsWatchTask
+// Browsersync Watch task
+export const bs = series(
+  parallel(
+    htmlTask,
+    scssTask,
+    jsTask,
+    imgTask,
+    fontsTask,
+    fontawesomeTask,
+  ),
+  cacheBustTask,
+  bsSync,
+  watchTask,
 );
+
